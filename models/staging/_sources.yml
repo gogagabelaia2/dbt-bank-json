@@ -1,0 +1,8 @@
+sources:
+  - name: bank_json
+    database: PRACTICE_DB
+    schema: JSON_LAB
+    description: bank datas in json type
+    tables: 
+      - name: raw_customers_json
+      - name: raw_transactions_json
