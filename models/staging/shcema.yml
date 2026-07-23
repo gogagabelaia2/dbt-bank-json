@@ -1,0 +1,342 @@
+version: 2
+
+models:
+  - name: stg_transactions
+    description: >
+      Staging model for transactions. One row per transaction.
+      Parsed from raw semi-structured JSON; array fields are exposed
+      as aggregates (n_items, total_fees) and detailed in separate models.
+    config:
+      meta:
+        owner: "goga"
+        business_domain: "finance"
+        sla: "daily"
+    columns:
+      - name: transaction_id
+        description: "Unique identifier of the transaction (primary key)"
+        tests:
+          - unique
+          - not_null
+
+      - name: account_id
+        description: "Account the transaction was executed on"
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customer_accounts')
+                field: account_id
+              config:
+                severity: warn
+
+      - name: customer_id
+        description: "Customer who owns the account"
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customer_accounts')
+                field: customer_id
+              config:
+                severity: warn
+
+      - name: transaction_tm
+        description: "Transaction timestamp (no timezone)"
+        tests:
+          - not_null
+
+      - name: transaction_date
+        description: "Transaction date, derived from the timestamp for daily aggregation"
+        tests:
+          - not_null
+
+      - name: transaction_type
+        description: "Type of operation: transfer, card payment, withdrawal, etc."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['utility_payment', 'loan_repayment', 'deposit',
+                         'transfer', 'card_payment', 'cash_withdrawal']
+
+      - name: channel
+        description: "Channel through which the transaction was initiated"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['atm', 'mobile_app', 'pos', 'branch', 'internet_bank']
+              config:
+                severity: warn
+
+      - name: amount_value
+        description: "Transaction amount in the original currency"
+        tests:
+          - not_null
+
+      - name: amount_currency
+        description: "ISO currency code of the transaction amount"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['USD', 'GEL', 'EUR']
+              config:
+                severity: warn
+
+      - name: transaction_status
+        description: "Execution status: completed, pending or failed"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['pending', 'completed', 'failed']
+
+      - name: merchant_name
+        description: "Merchant name; populated only for card payments"
+
+      - name: merchant_city
+        description: "Merchant city; populated only for card payments"
+
+      - name: merchant_category
+        description: "Merchant category; populated only for card payments"
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['groceries', 'fuel', 'pharmacy', 'transport',
+                         'food_delivery', 'utilities', 'entertainment']
+              config:
+                where: "merchant_category is not null"
+  
+  - name: stg_transaction_items
+    description: >
+      Staging model for transaction line items. One row per item.
+      Built by flattening the items array; only card payments carry items,
+      so this model covers a subset of transactions.
+    config:
+      meta:
+        owner: "goga"
+        business_domain: "finance"
+        sla: "daily"
+    columns:
+      - name: transaction_id
+        description: "Parent transaction this item belongs to (foreign key)"
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_transactions')
+                field: transaction_id
+
+      - name: customer_id
+        description: "Customer who made the purchase; denormalized from the transaction"
+        tests:
+          - not_null
+
+      - name: transaction_date
+        description: "Date of the parent transaction, for daily aggregation"
+        tests:
+          - not_null
+
+      - name: item_seq
+        description: "Position of the item within the original JSON array, starting at 0"
+        tests:
+          - not_null
+
+      - name: item_id
+        description: "Item identifier within the transaction; not globally unique"
+        tests:
+          - not_null
+
+      - name: merchant_name
+        description: "Merchant of the parent card payment"
+        tests:
+          - not_null
+
+      - name: merchant_category
+        description: "Merchant category of the parent card payment"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['entertainment', 'food_delivery', 'fuel', 'pharmacy',
+                         'transport', 'utilities', 'groceries']
+
+      - name: description
+        description: "Free-text description of the purchased item"
+        tests:
+          - not_null
+
+      - name: quantity
+        description: "Number of units purchased"
+        tests:
+          - not_null
+
+      - name: unit_price
+        description: "Price per unit in the transaction currency"
+        tests:
+          - not_null
+
+      - name: line_total
+        description: "quantity multiplied by unit_price"
+        tests:
+          - not_null
+
+  - name: stg_transaction_fees
+    description: >
+      Staging model for transaction fees. One row per fee.
+      Built by flattening the fees array; transactions without fees
+      are excluded, since the grain of this model is a single fee.
+    config:
+      meta:
+        owner: "goga"
+        business_domain: "finance"
+        sla: "daily"
+    columns:
+      - name: transaction_id
+        description: "Parent transaction this fee belongs to (foreign key)"
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_transactions')
+                field: transaction_id
+
+      - name: customer_id
+        description: "Customer charged the fee; denormalized from the transaction"
+        tests:
+          - not_null
+
+      - name: transaction_date
+        description: "Date of the parent transaction, for daily aggregation"
+        tests:
+          - not_null
+
+      - name: transaction_type
+        description: "Type of the parent transaction; fee tariffs differ by type"
+        tests:
+          - not_null
+
+      - name: channel
+        description: "Channel of the parent transaction; fee tariffs differ by channel"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['atm', 'mobile_app', 'pos', 'branch', 'internet_bank']
+              config:
+                severity: warn
+
+      - name: fee_seq
+        description: "Position of the fee within the original JSON array, starting at 0"
+        tests:
+          - not_null
+
+      - name: fee_type
+        description: "Kind of fee charged: commission, FX conversion or service"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['commission', 'fx_conversion', 'service']
+
+      - name: fee_amount
+        description: "Fee amount in the transaction currency"
+        tests:
+          - not_null
+
+  - name: stg_customer_accounts
+    description: >
+      Staging model for customer accounts. One row per account.
+      Built by flattening the accounts array; customer attributes
+      are denormalized onto every account row.
+    config:
+      meta:
+        owner: "goga"
+        business_domain: "customers"
+        sla: "daily"
+    columns:
+      - name: account_id
+        description: "Unique identifier of the account (primary key)"
+        tests:
+          - unique
+          - not_null
+
+      - name: customer_id
+        description: "Customer who owns the account; repeats across their accounts"
+        tests:
+          - not_null
+
+      - name: full_name
+        description: "Customer first and last name concatenated"
+        tests:
+          - not_null
+
+      - name: birth_year
+        description: "Year of birth, used to derive customer age"
+        tests:
+          - not_null
+
+      - name: city
+        description: "City of residence of the customer"
+        tests:
+          - not_null
+
+      - name: segment
+        description: "Business segment the customer belongs to"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['sme', 'corporate', 'retail', 'premium']
+
+      - name: branch_id
+        description: "Branch servicing the customer"
+        tests:
+          - not_null
+
+      - name: kyc_status
+        description: "KYC verification state of the customer"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['verified', 'pending', 'expired']
+
+      - name: kyc_last_updated
+        description: "Date the KYC record was last refreshed"
+        tests:
+          - not_null
+
+      - name: account_type
+        description: "Type of account: current, savings, credit card or deposit"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['current', 'savings', 'credit_card', 'deposit']
+
+      - name: currency
+        description: "ISO currency code the account is denominated in"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['GEL', 'USD', 'EUR']
+              config:
+                severity: warn
+
+      - name: balance
+        description: "Current account balance in the account currency"
+        tests:
+          - not_null
+
+      - name: is_active
+        description: "Whether the account is currently active"
+        tests:
+          - not_null
+
+      - name: opened_date
+        description: "Date the account was opened"
+        tests:
+          - not_null
