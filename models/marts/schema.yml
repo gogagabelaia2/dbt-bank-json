@@ -1,0 +1,117 @@
+version: 2
+
+models:
+  - name: fct_fee_income_by_channel
+    description: >
+      Fee income aggregated by channel and fee type, with share-of-channel
+      and ranking metrics. One row per channel and fee type combination.
+    config:
+      meta:
+        owner: "goga"
+        business_domain: "finance"
+        sla: "daily"
+    columns:
+      - name: channel
+        description: "Channel through which the parent transaction was initiated"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['atm', 'mobile_app', 'pos', 'branch', 'internet_bank']
+
+      - name: fee_type
+        description: "Kind of fee charged: commission, FX conversion or service"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['commission', 'fx_conversion', 'service']
+
+      - name: n_fees
+        description: "Number of individual fees charged in this channel and type"
+        tests:
+          - not_null
+
+      - name: total_fee_income
+        description: "Total fee income for this channel and fee type"
+        tests:
+          - not_null
+
+      - name: avg_fee
+        description: "Average amount of a single fee, rounded to two decimals"
+        tests:
+          - not_null
+
+      - name: pct_of_channel
+        description: "Share of this fee type within the channel's total fee income, in percent"
+        tests:
+          - not_null
+
+      - name: rank_in_channel
+        description: "Rank of this fee type by income within the channel, 1 is highest"
+        tests:
+          - not_null
+
+      - name: overall_rank
+        description: "Rank of this channel and fee type combination across all rows"
+        tests:
+          - not_null
+
+  - name: fct_merchant_spend
+    description: >
+      Card spend aggregated by merchant and category, with basket metrics
+      and ranking within category. One row per merchant and category.
+    config:
+      meta:
+        owner: "goga"
+        business_domain: "finance"
+        sla: "daily"
+    columns:
+      - name: merchant_name
+        description: "Merchant the card payments were made at"
+        tests:
+          - not_null
+
+      - name: merchant_category
+        description: "Category the merchant belongs to"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['entertainment', 'food_delivery', 'fuel', 'pharmacy',
+                         'transport', 'utilities', 'groceries']
+
+      - name: n_transactions
+        description: "Distinct card payments made at this merchant"
+        tests:
+          - not_null
+
+      - name: n_items
+        description: "Total line items purchased at this merchant"
+        tests:
+          - not_null
+
+      - name: total_spend
+        description: "Total amount spent at this merchant, summed from line totals"
+        tests:
+          - not_null
+
+      - name: avg_unit_price
+        description: "Average price of a single purchased unit"
+        tests:
+          - not_null
+
+      - name: avg_basket_value
+        description: "Average spend per transaction at this merchant"
+        tests:
+          - not_null
+
+      - name: rank_in_category
+        description: "Rank of this merchant by spend within its category, 1 is highest"
+        tests:
+          - not_null
+
+      - name: pct_of_category
+        description: "Share of this merchant in the category's total spend, in percent"
+        tests:
+          - not_null
